@@ -14,7 +14,7 @@ FILE_PATH = "latest_forecast.json"
 
 
 # -------------------------------------------------
-# Lifespan (modern replacement for on_event)
+# Lifespan handler for startup/shutdown
 # -------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -61,7 +61,7 @@ app = FastAPI(
 # CORS (restrict allow_origins in production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Replace with your frontend domain in production
+    allow_origins=["*"],  # Replace with your web and app domain before public release
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
