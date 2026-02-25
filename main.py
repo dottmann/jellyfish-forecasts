@@ -4,27 +4,30 @@ import os
 
 app = FastAPI()
 
+# ---- Load forecast once at startup ----
+file_path = "latest_forecast.json"
+
+if os.path.exists(file_path):
+    with open(file_path) as f:
+        forecast_data = json.load(f)
+else:
+    forecast_data = None
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 @app.get("/jellyfish_forecast")
 def get_forecast(date: str = Query(None)):
-    file_path = "latest_forecast.json"
 
-    if not os.path.exists(file_path):
+    if forecast_data is None:
         return {"error": "Forecast file not found"}
 
-    with open(file_path) as f:
-        data = json.load(f)
-
-    # If no date specified, return full dataset
     if date is None:
-        return data
+        return forecast_data
 
-    # Filter features by forecast_date
     filtered_features = [
-        feature for feature in data["features"]
+        feature for feature in forecast_data["features"]
         if feature["properties"]["forecast_date"] == date
     ]
 
