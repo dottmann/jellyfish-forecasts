@@ -17,6 +17,19 @@ else:
 def health():
     return {"status": "ok"}
 
+@app.get("/available_dates")
+def available_dates():
+
+    if forecast_data is None:
+        return {"error": "Forecast file not found"}
+
+    dates = sorted({
+        feature["properties"]["forecast_date"]
+        for feature in forecast_data["features"]
+    })
+
+    return {"available_dates": dates}
+
 @app.get("/jellyfish_forecast")
 def get_forecast(date: str = Query(None)):
 
