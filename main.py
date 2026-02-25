@@ -4,6 +4,10 @@ import os
 
 app = FastAPI()
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
 @app.get("/jellyfish_forecast")
 def get_forecast():
     file_path = "latest_forecast.json"
