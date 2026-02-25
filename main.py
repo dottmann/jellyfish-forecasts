@@ -1,50 +1,79 @@
 from fastapi import FastAPI, Query, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import Dict, List, Any
+from contextlib import asynccontextmanager
 import json
 import os
 import logging
 
-app = FastAPI(title="Jellyfish Forecast API")
-
 logging.basicConfig(level=logging.INFO)
 
-file_path = "latest_forecast.json"
-
-forecast_data: Dict[str, Any] | None = None
-data_by_date: Dict[str, List[Dict[str, Any]]] = {}
-available_dates_cache: List[str] = []
+FILE_PATH = "latest_forecast.json"
 
 
-# -----------------------------
-# Startup: load + index data
-# -----------------------------
-@app.on_event("startup")
-def load_forecast():
+# -------------------------------------------------
+# Lifespan (modern replacement for on_event)
+# -------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
 
-    global forecast_data, data_by_date, available_dates_cache
-
-    if not os.path.exists(file_path):
+    if not os.path.exists(FILE_PATH):
         logging.error("Forecast file not found.")
+        app.state.forecast_data = None
+        app.state.data_by_date = {}
+        app.state.available_dates = []
+        yield
         return
 
-    with open(file_path) as f:
+    with open(FILE_PATH) as f:
         forecast_data = json.load(f)
 
-    # Index by date (performance boost)
+    data_by_date: Dict[str, List[Dict[str, Any]]] = {}
+
     for feature in forecast_data["features"]:
         date = feature["properties"]["forecast_date"]
         data_by_date.setdefault(date, []).append(feature)
 
-    available_dates_cache = sorted(data_by_date.keys())
+    app.state.forecast_data = forecast_data
+    app.state.data_by_date = data_by_date
+    app.state.available_dates = sorted(data_by_date.keys())
 
-    logging.info(f"Loaded forecast with {len(forecast_data['features'])} grid points")
-    logging.info(f"Available dates: {available_dates_cache}")
+    logging.info(f"Loaded {len(forecast_data['features'])} grid points")
+    logging.info(f"Available dates: {app.state.available_dates}")
+
+    yield
+
+    # Optional shutdown cleanup
+    logging.info("Shutting down API")
 
 
-# -----------------------------
-# Response Models
-# -----------------------------
+app = FastAPI(
+    title="Jellyfish Forecast API",
+    lifespan=lifespan
+)
+
+# -------------------------------------------------
+# Middleware
+# -------------------------------------------------
+
+# CORS (restrict allow_origins in production)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Replace with your frontend domain in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# GZip compression (big win for GeoJSON)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+# -------------------------------------------------
+# Response Model
+# -------------------------------------------------
 class PointForecastResponse(BaseModel):
     lat: float
     lon: float
@@ -57,9 +86,9 @@ class PointForecastResponse(BaseModel):
     risk_level: str
 
 
-# -----------------------------
+# -------------------------------------------------
 # Endpoints
-# -----------------------------
+# -------------------------------------------------
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -68,27 +97,27 @@ def health():
 @app.get("/available_dates")
 def available_dates():
 
-    if forecast_data is None:
+    if app.state.forecast_data is None:
         raise HTTPException(status_code=503, detail="Forecast not loaded")
 
-    return {"available_dates": available_dates_cache}
+    return {"available_dates": app.state.available_dates}
 
 
 @app.get("/jellyfish_forecast")
-def get_forecast(date: str = Query(None)):
+def jellyfish_forecast(date: str = Query(None)):
 
-    if forecast_data is None:
+    if app.state.forecast_data is None:
         raise HTTPException(status_code=503, detail="Forecast not loaded")
 
     if date is None:
-        return forecast_data
+        return app.state.forecast_data
 
-    if date not in data_by_date:
+    if date not in app.state.data_by_date:
         raise HTTPException(status_code=404, detail="Date not found")
 
     return {
         "type": "FeatureCollection",
-        "features": data_by_date[date]
+        "features": app.state.data_by_date[date]
     }
 
 
@@ -99,15 +128,14 @@ def point_forecast(
     date: str = Query(...)
 ):
 
-    if forecast_data is None:
+    if app.state.forecast_data is None:
         raise HTTPException(status_code=503, detail="Forecast not loaded")
 
-    if date not in data_by_date:
+    if date not in app.state.data_by_date:
         raise HTTPException(status_code=404, detail="Date not found")
 
-    daily_features = data_by_date[date]
+    daily_features = app.state.data_by_date[date]
 
-    # Find nearest grid point (fast, no full dataset scan)
     nearest_feature = min(
         daily_features,
         key=lambda feature: (
@@ -119,7 +147,6 @@ def point_forecast(
     props = nearest_feature["properties"]
     grid_lon, grid_lat = nearest_feature["geometry"]["coordinates"]
 
-    # Risk classification
     heat = props["heat"]
 
     if heat > 0.8:
