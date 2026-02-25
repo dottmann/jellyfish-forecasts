@@ -78,9 +78,9 @@ def point_forecast(lat: float, lon: float, date: str):
     grid_lon, grid_lat = nearest_feature["geometry"]["coordinates"]
 
     # Simple risk classification based on prob_2
-    if props["prob_2"] > 0.6:
+    if props["heat"] > 0.8:
         risk_level = "HIGH"
-    elif props["prob_2"] > 0.3:
+    elif props["heat"] > 0.4:
         risk_level = "MEDIUM"
     else:
         risk_level = "LOW"
