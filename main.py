@@ -49,14 +49,14 @@ async def lifespan(app: FastAPI):
     logging.info("Shutting down API")
 
 
+# -------------------------------------------------
+# Middleware
+# -------------------------------------------------
+
 app = FastAPI(
     title="Jellyfish Forecast API",
     lifespan=lifespan
 )
-
-# -------------------------------------------------
-# Middleware
-# -------------------------------------------------
 
 # CORS (restrict allow_origins in production)
 app.add_middleware(
