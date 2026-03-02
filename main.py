@@ -178,14 +178,12 @@ def point_forecast(
     )
 
 
-@app.get("/heatmap_tile/{z}/{x}/{y}.png")
-def heatmap_tile(
-    z: int,
-    x: int,
-    y: int,
-    date: str = Query(...)
-):
-
+@app.get("/coastal_lines")
+def coastal_lines(date: str = Query(...)):
+    """
+    Returns coastal points grouped by island, ordered as a continuous polyline,
+    each point including its heat value for color interpolation in the Flutter app.
+    """
     if app.state.forecast_data is None:
         raise HTTPException(status_code=503, detail="Forecast not loaded")
 
@@ -194,42 +192,69 @@ def heatmap_tile(
 
     features = app.state.data_by_date[date]
 
-    # Get tile geographic bounds
-    tile = mercantile.Tile(x=x, y=y, z=z)
-    bounds = mercantile.bounds(tile)
-
-    west, south, east, north = bounds
-
-    size = 256
-    heat_grid = np.zeros((size, size), dtype=np.float32)
-
-    # Rasterize points into grid
+    # Group points by island
+    islands: Dict[str, List[Dict]] = {}
     for feature in features:
-        lon, lat = feature["geometry"]["coordinates"]
-        heat = feature["properties"]["heat"]
+        island = feature["properties"].get("island", "Unknown")
+        islands.setdefault(island, []).append(feature)
 
-        if west <= lon <= east and south <= lat <= north:
-            px = int((lon - west) / (east - west) * size)
-            py = int((north - lat) / (north - south) * size)
+    result = []
+    for island_name, island_features in islands.items():
+        coords = np.array([f["geometry"]["coordinates"] for f in island_features])
+        ordered_indices = _nearest_neighbour_order(coords)
 
-            if 0 <= px < size and 0 <= py < size:
-                heat_grid[py, px] += heat
+        points = []
+        for i in ordered_indices:
+            lon, lat = island_features[i]["geometry"]["coordinates"]
+            props = island_features[i]["properties"]
+            points.append({
+                "lat": lat,
+                "lon": lon,
+                "heat": props["heat"],
+                "prob_0": props["prob_0"],
+                "prob_1": props["prob_1"],
+                "prob_2": props["prob_2"],
+            })
 
-    if heat_grid.max() > 0:
-        heat_grid /= heat_grid.max()
+        result.append({
+            "island": island_name,
+            "points": points
+        })
 
-    # Smooth for continuous look
-    heat_grid = gaussian_filter(heat_grid, sigma=6)
+    return {"date": date, "islands": result}
 
-    # Apply colormap (jet-style marine look)
-    colormap = cm.get_cmap("jet")
-    rgba_img = colormap(heat_grid)
 
-    # Convert to 8-bit image
-    img = (rgba_img * 255).astype(np.uint8)
-    pil_img = Image.fromarray(img)
+def _nearest_neighbour_order(coords: np.ndarray) -> List[int]:
+    """
+    Orders points using a greedy nearest-neighbour algorithm to form
+    a continuous coastal polyline without crossing gaps.
+    """
+    n = len(coords)
+    if n == 0:
+        return []
 
-    # Return PNG
-    buffer = BytesIO()
-    pil_img.save(buffer, format="PNG")
-    return Response(content=buffer.getvalue(), media_type="image/png")
+    visited = [False] * n
+    order = []
+    current = 0
+
+    for _ in range(n):
+        visited[current] = True
+        order.append(current)
+
+        best_dist = float("inf")
+        best_next = -1
+
+        for j in range(n):
+            if not visited[j]:
+                dx = coords[current][0] - coords[j][0]
+                dy = coords[current][1] - coords[j][1]
+                dist = dx * dx + dy * dy
+                if dist < best_dist:
+                    best_dist = dist
+                    best_next = j
+
+        if best_next == -1:
+            break
+        current = best_next
+
+    return order
