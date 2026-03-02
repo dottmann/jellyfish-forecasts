@@ -7,6 +7,12 @@ from contextlib import asynccontextmanager
 import json
 import os
 import logging
+import numpy as np
+import mercantile
+from PIL import Image
+from io import BytesIO
+from scipy.ndimage import gaussian_filter
+import matplotlib.cm as cm
 
 logging.basicConfig(level=logging.INFO)
 
@@ -170,3 +176,60 @@ def point_forecast(
         heat=heat,
         risk_level=risk_level
     )
+
+
+@app.get("/heatmap_tile/{z}/{x}/{y}.png")
+def heatmap_tile(
+    z: int,
+    x: int,
+    y: int,
+    date: str = Query(...)
+):
+
+    if app.state.forecast_data is None:
+        raise HTTPException(status_code=503, detail="Forecast not loaded")
+
+    if date not in app.state.data_by_date:
+        raise HTTPException(status_code=404, detail="Date not found")
+
+    features = app.state.data_by_date[date]
+
+    # Get tile geographic bounds
+    tile = mercantile.Tile(x=x, y=y, z=z)
+    bounds = mercantile.bounds(tile)
+
+    west, south, east, north = bounds
+
+    size = 256
+    heat_grid = np.zeros((size, size), dtype=np.float32)
+
+    # Rasterize points into grid
+    for feature in features:
+        lon, lat = feature["geometry"]["coordinates"]
+        heat = feature["properties"]["heat"]
+
+        if west <= lon <= east and south <= lat <= north:
+            px = int((lon - west) / (east - west) * size)
+            py = int((north - lat) / (north - south) * size)
+
+            if 0 <= px < size and 0 <= py < size:
+                heat_grid[py, px] += heat
+
+    if heat_grid.max() > 0:
+        heat_grid /= heat_grid.max()
+
+    # Smooth for continuous look
+    heat_grid = gaussian_filter(heat_grid, sigma=6)
+
+    # Apply colormap (jet-style marine look)
+    colormap = cm.get_cmap("jet")
+    rgba_img = colormap(heat_grid)
+
+    # Convert to 8-bit image
+    img = (rgba_img * 255).astype(np.uint8)
+    pil_img = Image.fromarray(img)
+
+    # Return PNG
+    buffer = BytesIO()
+    pil_img.save(buffer, format="PNG")
+    return Response(content=buffer.getvalue(), media_type="image/png")
