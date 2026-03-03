@@ -178,12 +178,13 @@ def point_forecast(
     )
 
 
-@app.get("/coastal_lines")
-def coastal_lines(date: str = Query(...)):
-    """
-    Returns coastal points grouped by island, ordered as a continuous polyline,
-    each point including its heat value for color interpolation in the Flutter app.
-    """
+@app.get("/coastal_tile/{z}/{x}/{y}.png")
+def coastal_tile(
+    z: int,
+    x: int,
+    y: int,
+    date: str = Query(...)
+):
     if app.state.forecast_data is None:
         raise HTTPException(status_code=503, detail="Forecast not loaded")
 
@@ -192,69 +193,72 @@ def coastal_lines(date: str = Query(...)):
 
     features = app.state.data_by_date[date]
 
-    # Group points by island
+    # Tile bounds
+    tile = mercantile.Tile(x=x, y=y, z=z)
+    bounds = mercantile.bounds(tile)
+    west, south, east, north = bounds
+
+    # Add margin so lines near tile edges are not clipped
+    margin = (east - west) * 0.1
+    west_m, east_m = west - margin, east + margin
+    south_m, north_m = south - margin, north + margin
+
+    size = 256
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # Group by island and order points
     islands: Dict[str, List[Dict]] = {}
     for feature in features:
         island = feature["properties"].get("island", "Unknown")
         islands.setdefault(island, []).append(feature)
 
-    result = []
+    # Find global heat range for normalization
+    all_heats = [f["properties"]["heat"] for f in features]
+    min_heat = min(all_heats)
+    max_heat = max(all_heats)
+    heat_range = max(max_heat - min_heat, 0.001)
+
+    def heat_to_rgba(heat: float):
+        t = float(np.clip((heat - min_heat) / heat_range, 0.0, 1.0))
+        if t < 0.5:
+            s = t / 0.5
+            return (int(255 * s), int(255 * s), 255, 220)
+        else:
+            s = (t - 0.5) / 0.5
+            return (255, int(255 * (1 - s)), 0, 220)
+
+    def geo_to_px(lon, lat):
+        px = (lon - west) / (east - west) * size
+        py = (north - lat) / (north - south) * size
+        return (px, py)
+
     for island_name, island_features in islands.items():
         coords = np.array([f["geometry"]["coordinates"] for f in island_features])
         ordered_indices = _nearest_neighbour_order(coords)
 
-        points = []
-        for i in ordered_indices:
-            lon, lat = island_features[i]["geometry"]["coordinates"]
-            props = island_features[i]["properties"]
-            points.append({
-                "lat": lat,
-                "lon": lon,
-                "heat": props["heat"],
-                "prob_0": props["prob_0"],
-                "prob_1": props["prob_1"],
-                "prob_2": props["prob_2"],
-            })
+        for i in range(len(ordered_indices) - 1):
+            idx_a = ordered_indices[i]
+            idx_b = ordered_indices[i + 1]
 
-        result.append({
-            "island": island_name,
-            "points": points
-        })
+            lon_a, lat_a = island_features[idx_a]["geometry"]["coordinates"]
+            lon_b, lat_b = island_features[idx_b]["geometry"]["coordinates"]
 
-    return {"date": date, "islands": result}
+            # Skip segments completely outside tile (with margin)
+            if (max(lon_a, lon_b) < west_m or min(lon_a, lon_b) > east_m or
+                    max(lat_a, lat_b) < south_m or min(lat_a, lat_b) > north_m):
+                continue
 
+            heat_a = island_features[idx_a]["properties"]["heat"]
+            heat_b = island_features[idx_b]["properties"]["heat"]
+            avg_heat = (heat_a + heat_b) / 2
+            color = heat_to_rgba(avg_heat)
 
-def _nearest_neighbour_order(coords: np.ndarray) -> List[int]:
-    """
-    Orders points using a greedy nearest-neighbour algorithm to form
-    a continuous coastal polyline without crossing gaps.
-    """
-    n = len(coords)
-    if n == 0:
-        return []
+            px_a = geo_to_px(lon_a, lat_a)
+            px_b = geo_to_px(lon_b, lat_b)
 
-    visited = [False] * n
-    order = []
-    current = 0
+            draw.line([px_a, px_b], fill=color, width=3)
 
-    for _ in range(n):
-        visited[current] = True
-        order.append(current)
-
-        best_dist = float("inf")
-        best_next = -1
-
-        for j in range(n):
-            if not visited[j]:
-                dx = coords[current][0] - coords[j][0]
-                dy = coords[current][1] - coords[j][1]
-                dist = dx * dx + dy * dy
-                if dist < best_dist:
-                    best_dist = dist
-                    best_next = j
-
-        if best_next == -1:
-            break
-        current = best_next
-
-    return order
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    return Response(content=buffer.getvalue(), media_type="image/png")
