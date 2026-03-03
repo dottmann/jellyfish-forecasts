@@ -304,7 +304,7 @@ def coastal_tile(
 
             px_a = geo_to_px(lon_a, lat_a)
             px_b = geo_to_px(lon_b, lat_b)
-            draw.line([px_a, px_b], fill=color, width=3)
+            draw.line([px_a, px_b], fill=color, width=6)
 
     buffer = BytesIO()
     img.save(buffer, format="PNG")
