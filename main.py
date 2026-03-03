@@ -178,6 +178,37 @@ def point_forecast(
     )
 
 
+def _nearest_neighbour_order(coords: np.ndarray) -> List[int]:
+    n = len(coords)
+    if n == 0:
+        return []
+
+    visited = [False] * n
+    order = []
+    current = 0
+
+    for _ in range(n):
+        visited[current] = True
+        order.append(current)
+
+        best_dist = float("inf")
+        best_next = -1
+
+        for j in range(n):
+            if not visited[j]:
+                dx = coords[current][0] - coords[j][0]
+                dy = coords[current][1] - coords[j][1]
+                dist = dx * dx + dy * dy
+                if dist < best_dist:
+                    best_dist = dist
+                    best_next = j
+
+        if best_next == -1:
+            break
+        current = best_next
+
+    return order
+
 @app.get("/coastal_tile/{z}/{x}/{y}.png")
 def coastal_tile(
     z: int,
