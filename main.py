@@ -365,3 +365,25 @@ def heatmap_tile(
     buffer = BytesIO()
     pil_img.save(buffer, format="PNG")
     return Response(content=buffer.getvalue(), media_type="image/png")
+
+
+  @app.get("/legend.png")
+def legend():
+    width = 256
+    height = 24
+    img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    for px in range(width):
+        t = px / (width - 1)
+        if t < 0.5:
+            s = t / 0.5
+            color = (int(255 * s), int(255 * s), 255, 220)
+        else:
+            s = (t - 0.5) / 0.5
+            color = (255, int(255 * (1 - s)), 0, 220)
+        draw.line([(px, 0), (px, height)], fill=color)
+
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    return Response(content=buffer.getvalue(), media_type="image/png")  
