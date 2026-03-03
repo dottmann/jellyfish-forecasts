@@ -30,38 +30,6 @@ TILE_RANGES = {
 # -------------------------------------------------
 # Helper
 # -------------------------------------------------
-def _nearest_neighbour_order(coords: np.ndarray) -> List[int]:
-    n = len(coords)
-    if n == 0:
-        return []
-
-    visited = [False] * n
-    order = []
-    current = 0
-
-    for _ in range(n):
-        visited[current] = True
-        order.append(current)
-
-        best_dist = float("inf")
-        best_next = -1
-
-        for j in range(n):
-            if not visited[j]:
-                dx = coords[current][0] - coords[j][0]
-                dy = coords[current][1] - coords[j][1]
-                dist = dx * dx + dy * dy
-                if dist < best_dist:
-                    best_dist = dist
-                    best_next = j
-
-        if best_next == -1:
-            break
-        current = best_next
-
-    return order
-
-
 def _render_tile(
     z: int,
     x: int,
@@ -157,7 +125,7 @@ async def lifespan(app: FastAPI):
     app.state.data_by_date = data_by_date
     app.state.available_dates = sorted(data_by_date.keys())
 
-    # Pre-compute ordered coastal lines per date
+    # Pre-compute ordered coastal lines per date using point_id
     ordered_by_date: Dict[str, List[Dict]] = {}
     for date, day_features in data_by_date.items():
         islands: Dict[str, List[Dict]] = {}
@@ -167,9 +135,10 @@ async def lifespan(app: FastAPI):
 
         island_lines = []
         for island_name, island_features in islands.items():
-            coords = np.array([f["geometry"]["coordinates"] for f in island_features])
-            ordered_indices = _nearest_neighbour_order(coords)
-            ordered_points = [island_features[i] for i in ordered_indices]
+            ordered_points = sorted(
+                island_features,
+                key=lambda f: f["properties"]["point_id"]
+            )
             island_lines.append({"island": island_name, "points": ordered_points})
 
         ordered_by_date[date] = island_lines
@@ -337,7 +306,6 @@ def coastal_tile(
     if date not in app.state.data_by_date:
         raise HTTPException(status_code=404, detail="Date not found")
 
-    # Serve from cache if available
     cache_key = f"{date}/{z}/{x}/{y}"
     tile_bytes = app.state.tile_cache.get(cache_key)
 
