@@ -18,96 +18,13 @@ logging.basicConfig(level=logging.INFO)
 
 FILE_PATH = "latest_forecast.json"
 
-
-# -------------------------------------------------
-# Lifespan handler for startup/shutdown
-# -------------------------------------------------
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-
-    if not os.path.exists(FILE_PATH):
-        logging.error("Forecast file not found.")
-        app.state.forecast_data = None
-        app.state.data_by_date = {}
-        app.state.available_dates = []
-        app.state.ordered_by_date = {}
-        yield
-        return
-
-    with open(FILE_PATH) as f:
-        forecast_data = json.load(f)
-
-    data_by_date: Dict[str, List[Dict[str, Any]]] = {}
-
-    for feature in forecast_data["features"]:
-        date = feature["properties"]["forecast_date"]
-        data_by_date.setdefault(date, []).append(feature)
-
-    app.state.forecast_data = forecast_data
-    app.state.data_by_date = data_by_date
-    app.state.available_dates = sorted(data_by_date.keys())
-
-    # Pre-compute ordered coastal lines per date
-    ordered_by_date: Dict[str, List[Dict]] = {}
-    for date, day_features in data_by_date.items():
-        islands: Dict[str, List[Dict]] = {}
-        for feature in day_features:
-            island = feature["properties"].get("island", "Unknown")
-            islands.setdefault(island, []).append(feature)
-
-        island_lines = []
-        for island_name, island_features in islands.items():
-            coords = np.array([f["geometry"]["coordinates"] for f in island_features])
-            ordered_indices = _nearest_neighbour_order(coords)
-            ordered_points = [island_features[i] for i in ordered_indices]
-            island_lines.append({"island": island_name, "points": ordered_points})
-
-        ordered_by_date[date] = island_lines
-
-    app.state.ordered_by_date = ordered_by_date
-
-    logging.info(f"Loaded {len(forecast_data['features'])} grid points")
-    logging.info(f"Available dates: {app.state.available_dates}")
-    logging.info("Pre-computed coastal line ordering for all dates")
-
-    yield
-
-    logging.info("Shutting down API")
-
-
-# -------------------------------------------------
-# Middleware
-# -------------------------------------------------
-
-app = FastAPI(
-    title="Jellyfish Forecast API",
-    lifespan=lifespan
-)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.add_middleware(GZipMiddleware, minimum_size=1000)
-
-
-# -------------------------------------------------
-# Response Models
-# -------------------------------------------------
-class PointForecastResponse(BaseModel):
-    lat: float
-    lon: float
-    nearest_point: Dict[str, float]
-    forecast_date: str
-    prob_0: float
-    prob_1: float
-    prob_2: float
-    heat: float
-    risk_level: str
+# Tile ranges covering the Balearic Islands per zoom level
+TILE_RANGES = {
+    6: {"x": range(32, 34), "y": range(24, 26)},
+    7: {"x": range(65, 69), "y": range(48, 51)},
+    8: {"x": range(130, 137), "y": range(97, 102)},
+    9: {"x": range(261, 273), "y": range(194, 204)},
+}
 
 
 # -------------------------------------------------
@@ -143,6 +60,179 @@ def _nearest_neighbour_order(coords: np.ndarray) -> List[int]:
         current = best_next
 
     return order
+
+
+def _render_tile(
+    z: int,
+    x: int,
+    y: int,
+    date: str,
+    ordered_by_date: Dict,
+    data_by_date: Dict
+) -> bytes:
+    features = data_by_date[date]
+
+    tile = mercantile.Tile(x=x, y=y, z=z)
+    bounds = mercantile.bounds(tile)
+    west, south, east, north = bounds
+
+    margin = (east - west) * 0.1
+    west_m, east_m = west - margin, east + margin
+    south_m, north_m = south - margin, north + margin
+
+    size = 256
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    island_lines = ordered_by_date.get(date, [])
+
+    all_heats = [f["properties"]["heat"] for f in features]
+    min_heat = min(all_heats)
+    max_heat = max(all_heats)
+    heat_range = max(max_heat - min_heat, 0.001)
+
+    def heat_to_rgba(heat: float):
+        t = float(np.clip((heat - min_heat) / heat_range, 0.0, 1.0))
+        if t < 0.5:
+            s = t / 0.5
+            return (int(255 * s), int(255 * s), 255, 220)
+        else:
+            s = (t - 0.5) / 0.5
+            return (255, int(255 * (1 - s)), 0, 220)
+
+    def geo_to_px(lon, lat):
+        px = (lon - west) / (east - west) * size
+        py = (north - lat) / (north - south) * size
+        return (px, py)
+
+    for island_data in island_lines:
+        island_points = island_data["points"]
+        for i in range(len(island_points) - 1):
+            lon_a, lat_a = island_points[i]["geometry"]["coordinates"]
+            lon_b, lat_b = island_points[i + 1]["geometry"]["coordinates"]
+
+            if (max(lon_a, lon_b) < west_m or min(lon_a, lon_b) > east_m or
+                    max(lat_a, lat_b) < south_m or min(lat_a, lat_b) > north_m):
+                continue
+
+            heat_a = island_points[i]["properties"]["heat"]
+            heat_b = island_points[i + 1]["properties"]["heat"]
+            avg_heat = (heat_a + heat_b) / 2
+            color = heat_to_rgba(avg_heat)
+
+            px_a = geo_to_px(lon_a, lat_a)
+            px_b = geo_to_px(lon_b, lat_b)
+            draw.line([px_a, px_b], fill=color, width=6)
+
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+# -------------------------------------------------
+# Lifespan handler for startup/shutdown
+# -------------------------------------------------
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    if not os.path.exists(FILE_PATH):
+        logging.error("Forecast file not found.")
+        app.state.forecast_data = None
+        app.state.data_by_date = {}
+        app.state.available_dates = []
+        app.state.ordered_by_date = {}
+        app.state.tile_cache = {}
+        yield
+        return
+
+    with open(FILE_PATH) as f:
+        forecast_data = json.load(f)
+
+    data_by_date: Dict[str, List[Dict[str, Any]]] = {}
+    for feature in forecast_data["features"]:
+        date = feature["properties"]["forecast_date"]
+        data_by_date.setdefault(date, []).append(feature)
+
+    app.state.forecast_data = forecast_data
+    app.state.data_by_date = data_by_date
+    app.state.available_dates = sorted(data_by_date.keys())
+
+    # Pre-compute ordered coastal lines per date
+    ordered_by_date: Dict[str, List[Dict]] = {}
+    for date, day_features in data_by_date.items():
+        islands: Dict[str, List[Dict]] = {}
+        for feature in day_features:
+            island = feature["properties"].get("island", "Unknown")
+            islands.setdefault(island, []).append(feature)
+
+        island_lines = []
+        for island_name, island_features in islands.items():
+            coords = np.array([f["geometry"]["coordinates"] for f in island_features])
+            ordered_indices = _nearest_neighbour_order(coords)
+            ordered_points = [island_features[i] for i in ordered_indices]
+            island_lines.append({"island": island_name, "points": ordered_points})
+
+        ordered_by_date[date] = island_lines
+
+    app.state.ordered_by_date = ordered_by_date
+    logging.info("Pre-computed coastal line ordering for all dates")
+
+    # Pre-render all tiles for the Balearic Islands area
+    tile_cache: Dict[str, bytes] = {}
+    for date in data_by_date.keys():
+        for z, ranges in TILE_RANGES.items():
+            for x in ranges["x"]:
+                for y in ranges["y"]:
+                    cache_key = f"{date}/{z}/{x}/{y}"
+                    tile_cache[cache_key] = _render_tile(
+                        z, x, y, date, ordered_by_date, data_by_date
+                    )
+        logging.info(f"Pre-rendered tiles for date {date}")
+
+    app.state.tile_cache = tile_cache
+    total = len(tile_cache)
+    logging.info(f"Tile cache ready: {total} tiles pre-rendered")
+
+    logging.info(f"Loaded {len(forecast_data['features'])} grid points")
+    logging.info(f"Available dates: {app.state.available_dates}")
+
+    yield
+
+    logging.info("Shutting down API")
+
+
+# -------------------------------------------------
+# Middleware
+# -------------------------------------------------
+app = FastAPI(
+    title="Jellyfish Forecast API",
+    lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+
+# -------------------------------------------------
+# Response Models
+# -------------------------------------------------
+class PointForecastResponse(BaseModel):
+    lat: float
+    lon: float
+    nearest_point: Dict[str, float]
+    forecast_date: str
+    prob_0: float
+    prob_1: float
+    prob_2: float
+    heat: float
+    risk_level: str
 
 
 # -------------------------------------------------
@@ -247,68 +337,18 @@ def coastal_tile(
     if date not in app.state.data_by_date:
         raise HTTPException(status_code=404, detail="Date not found")
 
-    features = app.state.data_by_date[date]
+    # Serve from cache if available
+    cache_key = f"{date}/{z}/{x}/{y}"
+    tile_bytes = app.state.tile_cache.get(cache_key)
 
-    # Tile bounds
-    tile = mercantile.Tile(x=x, y=y, z=z)
-    bounds = mercantile.bounds(tile)
-    west, south, east, north = bounds
+    if tile_bytes is not None:
+        return Response(content=tile_bytes, media_type="image/png")
 
-    # Margin so lines near tile edges are not clipped
-    margin = (east - west) * 0.1
-    west_m, east_m = west - margin, east + margin
-    south_m, north_m = south - margin, north + margin
-
-    size = 256
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-
-    # Use pre-computed ordered lines
-    island_lines = app.state.ordered_by_date.get(date, [])
-
-    # Global heat range for normalization
-    all_heats = [f["properties"]["heat"] for f in features]
-    min_heat = min(all_heats)
-    max_heat = max(all_heats)
-    heat_range = max(max_heat - min_heat, 0.001)
-
-    def heat_to_rgba(heat: float):
-        t = float(np.clip((heat - min_heat) / heat_range, 0.0, 1.0))
-        if t < 0.5:
-            s = t / 0.5
-            return (int(255 * s), int(255 * s), 255, 220)
-        else:
-            s = (t - 0.5) / 0.5
-            return (255, int(255 * (1 - s)), 0, 220)
-
-    def geo_to_px(lon, lat):
-        px = (lon - west) / (east - west) * size
-        py = (north - lat) / (north - south) * size
-        return (px, py)
-
-    for island_data in island_lines:
-        island_points = island_data["points"]
-        for i in range(len(island_points) - 1):
-            lon_a, lat_a = island_points[i]["geometry"]["coordinates"]
-            lon_b, lat_b = island_points[i + 1]["geometry"]["coordinates"]
-
-            # Skip segments outside tile
-            if (max(lon_a, lon_b) < west_m or min(lon_a, lon_b) > east_m or
-                    max(lat_a, lat_b) < south_m or min(lat_a, lat_b) > north_m):
-                continue
-
-            heat_a = island_points[i]["properties"]["heat"]
-            heat_b = island_points[i + 1]["properties"]["heat"]
-            avg_heat = (heat_a + heat_b) / 2
-            color = heat_to_rgba(avg_heat)
-
-            px_a = geo_to_px(lon_a, lat_a)
-            px_b = geo_to_px(lon_b, lat_b)
-            draw.line([px_a, px_b], fill=color, width=6)
-
-    buffer = BytesIO()
-    img.save(buffer, format="PNG")
-    return Response(content=buffer.getvalue(), media_type="image/png")
+    # Fallback: render on the fly for tiles outside pre-rendered range
+    tile_bytes = _render_tile(
+        z, x, y, date, app.state.ordered_by_date, app.state.data_by_date
+    )
+    return Response(content=tile_bytes, media_type="image/png")
 
 
 @app.get("/heatmap_tile/{z}/{x}/{y}.png")
@@ -346,7 +386,7 @@ def heatmap_tile(
     if heat_grid.max() > 0:
         heat_grid /= heat_grid.max()
 
-    heat_grid = gaussian_filter(heat_grid, sigma=6)
+    heat_grid = gaussian_filter(heat_grid, sigma=5)
 
     colormap = cm.get_cmap("jet")
     rgba_img = colormap(heat_grid)
