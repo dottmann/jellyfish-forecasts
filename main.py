@@ -9,7 +9,7 @@ import os
 import logging
 import numpy as np
 import mercantile
-from PIL import Image
+from PIL import Image, ImageDraw
 from io import BytesIO
 from scipy.ndimage import gaussian_filter
 import matplotlib.cm as cm
