@@ -63,10 +63,15 @@ def _render_tile(
         t = float(np.clip((heat - min_heat) / heat_range, 0.0, 1.0))
         if t < 0.5:
             s = t / 0.5
-            return (int(255 * s), int(255 * s), 255, 220)
+            r = int(0 + (238 - 0) * s)
+            g = int(197 + (201 - 197) * s)
+            b = int(205 + (0 - 205) * s)
         else:
             s = (t - 0.5) / 0.5
-            return (255, int(255 * (1 - s)), 0, 220)
+            r = int(238 + (139 - 238) * s)
+            g = int(201 + (0 - 201) * s)
+            b = int(0 + (0 - 0) * s)
+        return (r, g, b, 220)
 
     def geo_to_px(lon, lat):
         px = (lon - west) / (east - west) * size
@@ -312,7 +317,6 @@ def coastal_tile(
     if tile_bytes is not None:
         return Response(content=tile_bytes, media_type="image/png")
 
-    # Fallback: render on the fly for tiles outside pre-rendered range
     tile_bytes = _render_tile(
         z, x, y, date, app.state.ordered_by_date, app.state.data_by_date
     )
@@ -378,11 +382,15 @@ def legend():
         t = px / (width - 1)
         if t < 0.5:
             s = t / 0.5
-            color = (int(255 * s), int(255 * s), 255, 220)
+            r = int(0 + (238 - 0) * s)
+            g = int(197 + (201 - 197) * s)
+            b = int(205 + (0 - 205) * s)
         else:
             s = (t - 0.5) / 0.5
-            color = (255, int(255 * (1 - s)), 0, 220)
-        draw.line([(px, 0), (px, height)], fill=color)
+            r = int(238 + (139 - 238) * s)
+            g = int(201 + (0 - 201) * s)
+            b = int(0 + (0 - 0) * s)
+        draw.line([(px, 0), (px, height)], fill=(r, g, b, 220))
 
     buffer = BytesIO()
     img.save(buffer, format="PNG")
