@@ -367,7 +367,7 @@ def heatmap_tile(
     return Response(content=buffer.getvalue(), media_type="image/png")
 
 
-  @app.get("/legend.png")
+@app.get("/legend.png")
 def legend():
     width = 256
     height = 24
@@ -386,4 +386,4 @@ def legend():
 
     buffer = BytesIO()
     img.save(buffer, format="PNG")
-    return Response(content=buffer.getvalue(), media_type="image/png")  
+    return Response(content=buffer.getvalue(), media_type="image/png")
