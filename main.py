@@ -63,14 +63,14 @@ def _render_tile(
         t = float(np.clip((heat - min_heat) / heat_range, 0.0, 1.0))
         if t < 0.5:
             s = t / 0.5
-            r = int(176 + (255 - 176) * s)
-            g = int(242 + (215 - 242) * s)
-            b = int(109 + (0 - 109) * s)
+            r = int(32 + (255 - 32) * s)
+            g = int(178 + (193 - 178) * s)
+            b = int(171 + (7 - 171) * s)
         else:
             s = (t - 0.5) / 0.5
-            r = int(255 + (255 - 255) * s)
-            g = int(215 + (114 - 215) * s)
-            b = int(0 + (86 - 0) * s)
+            r = int(255 + (229 - 255) * s)
+            g = int(193 + (57 - 193) * s)
+            b = int(7 + (53 - 7) * s)
         return (r, g, b, 220)
 
     def geo_to_px(lon, lat):
@@ -382,14 +382,14 @@ def legend():
         t = px / (width - 1)
         if t < 0.5:
             s = t / 0.5
-            r = int(176 + (255 - 176) * s)
-            g = int(242 + (215 - 242) * s)
-            b = int(109 + (0 - 109) * s)
+            r = int(32 + (255 - 32) * s)
+            g = int(178 + (193 - 178) * s)
+            b = int(171 + (7 - 171) * s)
         else:
             s = (t - 0.5) / 0.5
-            r = int(255 + (255 - 255) * s)
-            g = int(215 + (114 - 215) * s)
-            b = int(0 + (86 - 0) * s)
+            r = int(255 + (229 - 255) * s)
+            g = int(193 + (57 - 193) * s)
+            b = int(7 + (53 - 7) * s)
         draw.line([(px, 0), (px, height)], fill=(r, g, b, 220))
 
     buffer = BytesIO()
