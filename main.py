@@ -307,6 +307,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 class PointForecastResponse(BaseModel):
     lat: float
     lon: float
+    nearest_lat: float
+    nearest_lon: float
     nearest_point: Dict[str, float]
     forecast_date: str
     prob_0: float
@@ -406,6 +408,8 @@ def point_forecast(
     return PointForecastResponse(
         lat=lat,
         lon=lon,
+        nearest_lat=grid_lat,
+        nearest_lon=grid_lon,
         nearest_point={"grid_lat": grid_lat, "grid_lon": grid_lon},
         forecast_date=date,
         prob_0=props["prob_0"],
