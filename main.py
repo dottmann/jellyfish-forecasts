@@ -14,6 +14,7 @@ from PIL import Image, ImageDraw
 from io import BytesIO
 from scipy.ndimage import gaussian_filter
 import matplotlib.cm as cm
+import unicodedata
 
 logging.basicConfig(level=logging.INFO)
 
