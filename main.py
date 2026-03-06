@@ -348,7 +348,10 @@ def search_locations(query: str = Query(..., min_length=1)):
     if app.state.forecast_data is None:
         raise HTTPException(status_code=503, detail="Forecast not loaded")
 
-    query_lower = query.lower().strip()
+    def _normalize(text: str) -> str:
+        return unicodedata.normalize("NFD", text.lower()).encode("ascii", "ignore").decode("ascii")
+
+    query_norm = _normalize(query.strip())
     results = [
         {
             "name": loc["name"],
@@ -357,7 +360,7 @@ def search_locations(query: str = Query(..., min_length=1)):
             "lon": loc["lon"],
         }
         for loc in app.state.searchable_locations
-        if query_lower in loc["name"].lower()
+        if query_norm in _normalize(loc["name"])
     ]
 
     return {"query": query, "results": results[:10]}
