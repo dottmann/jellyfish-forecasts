@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Query, HTTPException, Response
+from fastapi.responses import RedirectResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
@@ -528,3 +529,61 @@ def legend():
     buffer = BytesIO()
     img.save(buffer, format="PNG")
     return Response(content=buffer.getvalue(), media_type="image/png")
+
+@app.get("/invite/{tier}")
+def invite_redirect(tier: str):
+    """
+    QR code landing page. Redirects to the app deep link.
+    Use these URLs for your QR codes:
+      https://jellyfish-forecasts-api.onrender.com/invite/unlimited
+      https://jellyfish-forecasts-api.onrender.com/invite/trial
+    """
+    if tier not in ("unlimited", "trial"):
+        raise HTTPException(status_code=404, detail="Invalid invite link")
+
+    deep_link = f"pelagia://signup?tier={tier}"
+
+    # HTML page with JS redirect + fallback instructions
+    # The JS attempts to open the deep link; if the app isn't installed
+    # the user sees a friendly message instead of a broken redirect.
+    html = f"""
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Opening Pelagia...</title>
+  <style>
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; min-height: 100vh; margin: 0;
+      background: #f8f8f8; color: #333; text-align: center; padding: 20px;
+    }}
+    .icon {{ font-size: 64px; margin-bottom: 16px; }}
+    h1 {{ color: #20b2ab; font-size: 28px; margin-bottom: 8px; }}
+    p {{ color: #666; font-size: 16px; max-width: 320px; }}
+    .badge {{
+      display: inline-block; margin-top: 16px; padding: 6px 18px;
+      border-radius: 20px; font-weight: 600; font-size: 14px;
+      background: {"#e0f7f6" if tier == "unlimited" else "#fff3e0"};
+      color: {"#20b2ab" if tier == "unlimited" else "#f57c00"};
+      border: 1px solid {"#20b2ab" if tier == "unlimited" else "#f57c00"};
+    }}
+  </style>
+</head>
+<body>
+  <div class="icon">🪼</div>
+  <h1>Pelagia</h1>
+  <p>Opening the app with your invite...</p>
+  <div class="badge">{"Unlimited access" if tier == "unlimited" else "14-day trial"}</div>
+  <p style="margin-top:24px; font-size:13px; color:#aaa;">
+    If the app doesn't open, make sure Pelagia is installed on your device.
+  </p>
+  <script>
+    window.location.href = "{deep_link}";
+  </script>
+</body>
+</html>
+"""
+    return HTMLResponse(content=html)
