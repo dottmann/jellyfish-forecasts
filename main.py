@@ -7,16 +7,14 @@ from contextlib import asynccontextmanager
 import json
 import os
 import logging
-import math
 import numpy as np
 import mercantile
 from PIL import Image, ImageDraw
 from io import BytesIO
 from scipy.ndimage import gaussian_filter
 import matplotlib.cm as cm
-import unicodedata
 
-logging.basicConfig(level=logging.INFO)
+import unicodedata
 
 FILE_PATH = "latest_forecast.json"
 
@@ -28,88 +26,120 @@ TILE_RANGES = {
     9: {"x": range(261, 273), "y": range(194, 204)},
 }
 
+
+
 # Coastal towns and locations in the Balearic Islands
 BALEARIC_LOCATIONS = [
     # Mallorca
-    {"name": "Palma", "island": "Mallorca", "lat": 39.5696, "lon": 2.6502},
     {"name": "Alcudia", "island": "Mallorca", "lat": 39.8527, "lon": 3.1211},
-    {"name": "Port d'Alcudia", "island": "Mallorca", "lat": 39.8419, "lon": 3.1286},
-    {"name": "Can Picafort", "island": "Mallorca", "lat": 39.7627, "lon": 3.1575},
-    {"name": "Port de Pollença", "island": "Mallorca", "lat": 39.9058, "lon": 3.0814},
-    {"name": "Pollença", "island": "Mallorca", "lat": 39.8771, "lon": 3.0142},
-    {"name": "Cala Sant Vicenç", "island": "Mallorca", "lat": 39.9217, "lon": 3.0603},
-    {"name": "Formentor", "island": "Mallorca", "lat": 39.9594, "lon": 3.1289},
-    {"name": "Cala Millor", "island": "Mallorca", "lat": 39.5908, "lon": 3.3897},
-    {"name": "Cala Bona", "island": "Mallorca", "lat": 39.6019, "lon": 3.3961},
-    {"name": "Porto Cristo", "island": "Mallorca", "lat": 39.5378, "lon": 3.3344},
-    {"name": "Cales de Mallorca", "island": "Mallorca", "lat": 39.4767, "lon": 3.3733},
-    {"name": "Portocolom", "island": "Mallorca", "lat": 39.5178, "lon": 3.3264},
-    {"name": "Cala d'Or", "island": "Mallorca", "lat": 39.3783, "lon": 3.2292},
-    {"name": "Portopetro", "island": "Mallorca", "lat": 39.3608, "lon": 3.2244},
-    {"name": "Cala Figuera", "island": "Mallorca", "lat": 39.3281, "lon": 3.1644},
-    {"name": "Colònia de Sant Jordi", "island": "Mallorca", "lat": 39.3122, "lon": 2.9844},
-    {"name": "Sa Ràpita", "island": "Mallorca", "lat": 39.3597, "lon": 2.9578},
-    {"name": "s'Arenal", "island": "Mallorca", "lat": 39.4958, "lon": 2.7481},
-    {"name": "Magaluf", "island": "Mallorca", "lat": 39.5069, "lon": 2.5486},
-    {"name": "Santa Ponça", "island": "Mallorca", "lat": 39.5108, "lon": 2.4803},
-    {"name": "Peguera", "island": "Mallorca", "lat": 39.5358, "lon": 2.4469},
-    {"name": "Camp de Mar", "island": "Mallorca", "lat": 39.5367, "lon": 2.3969},
-    {"name": "Port d'Andratx", "island": "Mallorca", "lat": 39.5392, "lon": 2.3847},
-    {"name": "Sant Elm", "island": "Mallorca", "lat": 39.5803, "lon": 2.3506},
-    {"name": "Sóller", "island": "Mallorca", "lat": 39.7656, "lon": 2.7153},
-    {"name": "Port de Sóller", "island": "Mallorca", "lat": 39.7956, "lon": 2.6958},
-    {"name": "Deià", "island": "Mallorca", "lat": 39.7478, "lon": 2.6489},
-    {"name": "Valldemossa", "island": "Mallorca", "lat": 39.7128, "lon": 2.6247},
-    {"name": "Banyalbufar", "island": "Mallorca", "lat": 39.6894, "lon": 2.5158},
-    {"name": "Cala Rajada", "island": "Mallorca", "lat": 39.7081, "lon": 3.4586},
-    {"name": "Capdepera", "island": "Mallorca", "lat": 39.7033, "lon": 3.4281},
     {"name": "Artà", "island": "Mallorca", "lat": 39.6983, "lon": 3.3500},
+    {"name": "Banyalbufar", "island": "Mallorca", "lat": 39.6894, "lon": 2.5158},
+    {"name": "Cala Bona", "island": "Mallorca", "lat": 39.6019, "lon": 3.3961},
+    {"name": "Cala d'Or", "island": "Mallorca", "lat": 39.3783, "lon": 3.2292},
+    {"name": "Cala Deia", "island": "Mallorca", "lat": 39.7467, "lon": 2.6467},
+    {"name": "Cala Figuera", "island": "Mallorca", "lat": 39.3281, "lon": 3.1644},
+    {"name": "Cala Fornells", "island": "Mallorca", "lat": 39.5361, "lon": 2.4628},
+    {"name": "Cala Mesquida", "island": "Mallorca", "lat": 39.7311, "lon": 3.4583},
+    {"name": "Cala Millor", "island": "Mallorca", "lat": 39.5908, "lon": 3.3897},
+    {"name": "Cala Mondrago", "island": "Mallorca", "lat": 39.3567, "lon": 3.1969},
+    {"name": "Cala Rajada", "island": "Mallorca", "lat": 39.7081, "lon": 3.4586},
+    {"name": "Cala Romántica", "island": "Mallorca", "lat": 39.5467, "lon": 3.3533},
+    {"name": "Cala Sant Vicenç", "island": "Mallorca", "lat": 39.9217, "lon": 3.0603},
+    {"name": "Cala Santanyí", "island": "Mallorca", "lat": 39.3372, "lon": 3.1611},
+    {"name": "Cales de Mallorca", "island": "Mallorca", "lat": 39.4767, "lon": 3.3733},
+    {"name": "Camp de Mar", "island": "Mallorca", "lat": 39.5367, "lon": 2.3969},
+    {"name": "Can Picafort", "island": "Mallorca", "lat": 39.7627, "lon": 3.1575},
+    {"name": "Capdepera", "island": "Mallorca", "lat": 39.7033, "lon": 3.4281},
+    {"name": "Colònia de Sant Jordi", "island": "Mallorca", "lat": 39.3122, "lon": 2.9844},
     {"name": "Colònia de Sant Pere", "island": "Mallorca", "lat": 39.7272, "lon": 3.2275},
+    {"name": "Deià", "island": "Mallorca", "lat": 39.7478, "lon": 2.6489},
+    {"name": "Es Trenc", "island": "Mallorca", "lat": 39.3383, "lon": 2.9717},
+    {"name": "Formentor", "island": "Mallorca", "lat": 39.9594, "lon": 3.1289},
+    {"name": "Illetes", "island": "Mallorca", "lat": 39.5278, "lon": 2.5892},
+    {"name": "Magaluf", "island": "Mallorca", "lat": 39.5069, "lon": 2.5486},
+    {"name": "Palma", "island": "Mallorca", "lat": 39.5696, "lon": 2.6502},
+    {"name": "Palma Nova", "island": "Mallorca", "lat": 39.5083, "lon": 2.5267},
+    {"name": "Peguera", "island": "Mallorca", "lat": 39.5358, "lon": 2.4469},
+    {"name": "Platja de Formentor", "island": "Mallorca", "lat": 39.9200, "lon": 3.1950},
+    {"name": "Pollença", "island": "Mallorca", "lat": 39.8771, "lon": 3.0142},
+    {"name": "Port d'Alcudia", "island": "Mallorca", "lat": 39.8419, "lon": 3.1286},
+    {"name": "Port d'Andratx", "island": "Mallorca", "lat": 39.5392, "lon": 2.3847},
+    {"name": "Port de Pollença", "island": "Mallorca", "lat": 39.9058, "lon": 3.0814},
+    {"name": "Port de Sóller", "island": "Mallorca", "lat": 39.7956, "lon": 2.6958},
+    {"name": "Portixol", "island": "Mallorca", "lat": 39.5572, "lon": 2.6769},
+    {"name": "Porto Cristo", "island": "Mallorca", "lat": 39.5378, "lon": 3.3344},
+    {"name": "Portocolom", "island": "Mallorca", "lat": 39.5178, "lon": 3.3264},
+    {"name": "Portopetro", "island": "Mallorca", "lat": 39.3608, "lon": 3.2244},
+    {"name": "S'Arenal", "island": "Mallorca", "lat": 39.4958, "lon": 2.7481},
     {"name": "S'Illot", "island": "Mallorca", "lat": 39.5697, "lon": 3.3633},
-    {"name": "Cala Ratjada", "island": "Mallorca", "lat": 39.7081, "lon": 3.4586},
+    {"name": "Sa Calobra", "island": "Mallorca", "lat": 39.8533, "lon": 2.8014},
+    {"name": "Sa Ràpita", "island": "Mallorca", "lat": 39.3597, "lon": 2.9578},
+    {"name": "Sant Elm", "island": "Mallorca", "lat": 39.5803, "lon": 2.3506},
+    {"name": "Santa Ponça", "island": "Mallorca", "lat": 39.5108, "lon": 2.4803},
+    {"name": "Sóller", "island": "Mallorca", "lat": 39.7656, "lon": 2.7153},
+    {"name": "Valldemossa", "island": "Mallorca", "lat": 39.7128, "lon": 2.6247},
     # Menorca
-    {"name": "Maó", "island": "Menorca", "lat": 39.8885, "lon": 4.2656},
-    {"name": "Ciutadella", "island": "Menorca", "lat": 39.9994, "lon": 3.8369},
-    {"name": "Fornells", "island": "Menorca", "lat": 40.0603, "lon": 4.1319},
-    {"name": "Es Mercadal", "island": "Menorca", "lat": 39.9942, "lon": 4.0711},
     {"name": "Arenal d'en Castell", "island": "Menorca", "lat": 40.0514, "lon": 4.1697},
-    {"name": "Son Parc", "island": "Menorca", "lat": 40.0458, "lon": 4.1369},
+    {"name": "Binibèquer", "island": "Menorca", "lat": 39.8300, "lon": 4.2536},
+    {"name": "Cala Blanca", "island": "Menorca", "lat": 39.9636, "lon": 3.8397},
+    {"name": "Cala en Bosc", "island": "Menorca", "lat": 39.9514, "lon": 3.8286},
     {"name": "Cala en Porter", "island": "Menorca", "lat": 39.8500, "lon": 4.1294},
     {"name": "Cala Galdana", "island": "Menorca", "lat": 39.9317, "lon": 3.9583},
-    {"name": "Son Bou", "island": "Menorca", "lat": 39.8825, "lon": 4.0533},
-    {"name": "Binibèquer", "island": "Menorca", "lat": 39.8300, "lon": 4.2536},
-    {"name": "Punta Prima", "island": "Menorca", "lat": 39.8194, "lon": 4.2647},
-    {"name": "Cala en Bosc", "island": "Menorca", "lat": 39.9514, "lon": 3.8286},
-    {"name": "Cala Blanca", "island": "Menorca", "lat": 39.9636, "lon": 3.8397},
+    {"name": "Cala Macarella", "island": "Menorca", "lat": 39.8914, "lon": 3.8161},
+    {"name": "Cala Mitjana", "island": "Menorca", "lat": 39.9250, "lon": 4.0036},
+    {"name": "Cala Sa Mesquida", "island": "Menorca", "lat": 39.9972, "lon": 4.2703},
+    {"name": "Cala Turqueta", "island": "Menorca", "lat": 39.8997, "lon": 3.8678},
+    {"name": "Ciutadella", "island": "Menorca", "lat": 39.9994, "lon": 3.8369},
     {"name": "Es Castell", "island": "Menorca", "lat": 39.8711, "lon": 4.2789},
+    {"name": "Es Grau", "island": "Menorca", "lat": 39.9803, "lon": 4.2119},
+    {"name": "Es Mercadal", "island": "Menorca", "lat": 39.9942, "lon": 4.0711},
+    {"name": "Fornells", "island": "Menorca", "lat": 40.0603, "lon": 4.1319},
+    {"name": "Maó", "island": "Menorca", "lat": 39.8885, "lon": 4.2656},
+    {"name": "Playa de Binigaus", "island": "Menorca", "lat": 39.9139, "lon": 4.0572},
+    {"name": "Punta Prima", "island": "Menorca", "lat": 39.8194, "lon": 4.2647},
     {"name": "Sant Lluís", "island": "Menorca", "lat": 39.8472, "lon": 4.2561},
+    {"name": "Santo Tomás", "island": "Menorca", "lat": 39.9108, "lon": 4.0411},
+    {"name": "Son Bou", "island": "Menorca", "lat": 39.8825, "lon": 4.0533},
+    {"name": "Son Parc", "island": "Menorca", "lat": 40.0458, "lon": 4.1369},
     # Ibiza
-    {"name": "Eivissa", "island": "Ibiza", "lat": 38.9081, "lon": 1.4320},
-    {"name": "Sant Antoni de Portmany", "island": "Ibiza", "lat": 38.9800, "lon": 1.3011},
-    {"name": "Santa Eulària des Riu", "island": "Ibiza", "lat": 38.9842, "lon": 1.5358},
-    {"name": "Portinatx", "island": "Ibiza", "lat": 39.0744, "lon": 1.5297},
-    {"name": "Port de Sant Miquel", "island": "Ibiza", "lat": 39.0733, "lon": 1.4444},
+    {"name": "Aguas Blancas", "island": "Ibiza", "lat": 39.0803, "lon": 1.5561},
+    {"name": "Cala Bassa", "island": "Ibiza", "lat": 38.9817, "lon": 1.2578},
+    {"name": "Cala Comte", "island": "Ibiza", "lat": 38.9981, "lon": 1.2261},
+    {"name": "Cala d'en Serra", "island": "Ibiza", "lat": 39.0819, "lon": 1.5700},
+    {"name": "Cala d'Hort", "island": "Ibiza", "lat": 38.8819, "lon": 1.2297},
     {"name": "Cala de Sant Vicent", "island": "Ibiza", "lat": 39.0578, "lon": 1.5369},
-    {"name": "Es Canar", "island": "Ibiza", "lat": 39.0153, "lon": 1.5756},
+    {"name": "Cala Llentrisca", "island": "Ibiza", "lat": 38.8683, "lon": 1.2944},
     {"name": "Cala Llonga", "island": "Ibiza", "lat": 38.9603, "lon": 1.5514},
-    {"name": "Talamanca", "island": "Ibiza", "lat": 38.9192, "lon": 1.4533},
-    {"name": "Playa d'en Bossa", "island": "Ibiza", "lat": 38.8858, "lon": 1.4072},
-    {"name": "Ses Salines", "island": "Ibiza", "lat": 38.8717, "lon": 1.4136},
     {"name": "Cala Tarida", "island": "Ibiza", "lat": 38.9594, "lon": 1.2742},
     {"name": "Cala Vedella", "island": "Ibiza", "lat": 38.9119, "lon": 1.2267},
-    {"name": "Cala d'Hort", "island": "Ibiza", "lat": 38.8819, "lon": 1.2297},
+    {"name": "Eivissa", "island": "Ibiza", "lat": 38.9081, "lon": 1.4320},
+    {"name": "Es Canar", "island": "Ibiza", "lat": 39.0153, "lon": 1.5756},
+    {"name": "Es Cubells", "island": "Ibiza", "lat": 38.8628, "lon": 1.3192},
+    {"name": "Playa d'en Bossa", "island": "Ibiza", "lat": 38.8858, "lon": 1.4072},
+    {"name": "Port de Sant Miquel", "island": "Ibiza", "lat": 39.0733, "lon": 1.4444},
+    {"name": "Portinatx", "island": "Ibiza", "lat": 39.0744, "lon": 1.5297},
+    {"name": "Sant Antoni de Portmany", "island": "Ibiza", "lat": 38.9800, "lon": 1.3011},
     {"name": "Sant Josep de sa Talaia", "island": "Ibiza", "lat": 38.9194, "lon": 1.3056},
+    {"name": "Sant Miquel de Balansat", "island": "Ibiza", "lat": 39.0758, "lon": 1.4431},
+    {"name": "Santa Eulària des Riu", "island": "Ibiza", "lat": 38.9842, "lon": 1.5358},
+    {"name": "Ses Salines", "island": "Ibiza", "lat": 38.8717, "lon": 1.4136},
+    {"name": "Talamanca", "island": "Ibiza", "lat": 38.9192, "lon": 1.4533},
     # Formentera
-    {"name": "Sant Francesc Xavier", "island": "Formentera", "lat": 38.7019, "lon": 1.4325},
-    {"name": "Es Pujols", "island": "Formentera", "lat": 38.7253, "lon": 1.4747},
-    {"name": "La Savina", "island": "Formentera", "lat": 38.7342, "lon": 1.4156},
     {"name": "Cala Saona", "island": "Formentera", "lat": 38.6933, "lon": 1.3897},
     {"name": "Es Caló", "island": "Formentera", "lat": 38.7211, "lon": 1.5322},
+    {"name": "Es Pujols", "island": "Formentera", "lat": 38.7253, "lon": 1.4747},
     {"name": "La Mola", "island": "Formentera", "lat": 38.6708, "lon": 1.5833},
+    {"name": "La Savina", "island": "Formentera", "lat": 38.7342, "lon": 1.4156},
+    {"name": "Llevant", "island": "Formentera", "lat": 38.7431, "lon": 1.4194},
+    {"name": "Migjorn", "island": "Formentera", "lat": 38.6942, "lon": 1.4756},
+    {"name": "Sant Ferran de ses Roques", "island": "Formentera", "lat": 38.7019, "lon": 1.4619},
+    {"name": "Sant Francesc Xavier", "island": "Formentera", "lat": 38.7019, "lon": 1.4325},
+    {"name": "Ses Illetes", "island": "Formentera", "lat": 38.7456, "lon": 1.4083},
 ]
 
 
 def _haversine_km(lat1, lon1, lat2, lon2) -> float:
+    import math
     R = 6371.0
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
@@ -118,6 +148,11 @@ def _haversine_km(lat1, lon1, lat2, lon2) -> float:
          math.cos(math.radians(lat2)) *
          math.sin(dlon / 2) ** 2)
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+# -------------------------------------------------
+# Helper
+# -------------------------------------------------
 def _render_tile(
     z: int,
     x: int,
@@ -307,8 +342,6 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 class PointForecastResponse(BaseModel):
     lat: float
     lon: float
-    nearest_lat: float
-    nearest_lon: float
     nearest_point: Dict[str, float]
     forecast_date: str
     prob_0: float
@@ -408,8 +441,6 @@ def point_forecast(
     return PointForecastResponse(
         lat=lat,
         lon=lon,
-        nearest_lat=grid_lat,
-        nearest_lon=grid_lon,
         nearest_point={"grid_lat": grid_lat, "grid_lon": grid_lon},
         forecast_date=date,
         prob_0=props["prob_0"],
